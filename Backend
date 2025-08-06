@@ -1,0 +1,46 @@
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import subprocess
+import uuid
+
+app = FastAPI()
+
+# Allow frontend to connect
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# In-memory store for simplicity
+user_usage = {}
+
+class ScrapeRequest(BaseModel):
+    video_url: str
+    user_id: str
+
+@app.post("/scrape")
+def scrape_video(data: ScrapeRequest):
+    user_id = data.user_id
+
+    # Limit free users
+    usage = user_usage.get(user_id, 0)
+    if usage >= 2:
+        raise HTTPException(status_code=402, detail="Free limit reached. Please upgrade.")
+
+    # Scrape video title using yt-dlp (or use YouTube API)
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--get-title", data.video_url],
+            capture_output=True,
+            text=True,
+        )
+        title = result.stdout.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    user_usage[user_id] = usage + 1
+    return {"title": title, "remaining_free": max(0, 2 - user_usage[user_id])}
